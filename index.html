@@ -506,8 +506,11 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
   function pv(r){ var v = parseInt(r.periodValue,10); return v >= 1 ? v : 1; }
   function periodText(r){ return pv(r) + ' ' + (UNIT[r.periodUnit] || '天'); }
   function remindOf(r){ var n = parseInt(r.remindDays,10); return n >= 0 ? n : 3; }
+  function arr(x){ return Array.isArray(x) ? x : []; }
+  function cycleNo(r){ var n = parseInt(r.cycle,10); return n >= 1 ? n : 1; }
+  function validDate(s){ return typeof s === 'string' && !isNaN(parseD(s)); }
   function stagesOf(r){
-    var st = Array.isArray(r.stages) ? r.stages.filter(function(e){ return e && e.s >= 0 && e.s <= 3 && !isNaN(parseD(e.date)); }) : [];
+    var st = arr(r.stages).filter(function(e){ return e && [0,1,2,3].indexOf(+e.s) >= 0 && validDate(e.date); });
     return st.length ? st.map(function(e){ return { s:+e.s, date:e.date }; }) : [{ s:0, date:r.start }];
   }
   function stageOf(r){ var st = stagesOf(r); return st[st.length-1].s; }
@@ -549,7 +552,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
 
   /* every cycle of a record: past cycles from history plus the current one */
   function cyclesOf(r){
-    var list = (r.history || []).map(function(h){
+    var list = arr(r.history).map(function(h){
       var a = parseD(h.start), b = parseD(h.end);
       return { start:a, stop:b, planned:b, done:true, hist:true,
                stages: Array.isArray(h.stages) && h.stages.length ? h.stages : [{ s:0, date:h.start }] };
@@ -633,7 +636,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var q = S.q.trim().toLowerCase();
     var rs = !q ? all : all.filter(function(x){
       return String(x.r.name||'').toLowerCase().indexOf(q) >= 0 ||
-        (x.r.notes||[]).some(function(n){ return String(n.text||'').toLowerCase().indexOf(q) >= 0; });
+        arr(x.r.notes).some(function(n){ return String(n.text||'').toLowerCase().indexOf(q) >= 0; });
     });
     var active = rs.filter(function(x){ return x.r.status !== 'done'; });
     var att = active.filter(function(x){ return x.c.attention; }).sort(byRem);
@@ -721,10 +724,10 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var C = 2*Math.PI*52;
     var dash = (c.tone === 'done' || c.tone === 'over') ? C : Math.max(0.01, c.pct/100*C);
     var ringLabel = c.tone === 'done' ? '已完成' : (c.num === '今天' ? '今天到期' : c.num + ' ' + c.label);
-    var notes = (r.notes || []).slice().sort(function(a, b){
+    var notes = arr(r.notes).slice().sort(function(a, b){
       return String(b.date||'').localeCompare(String(a.date||'')) || (b.t||0) - (a.t||0);
     });
-    var hist = (r.history || []);
+    var hist = arr(r.history);
     var acts = r.status === 'done'
       ? '<button type="button" class="btn primary" data-act="reopen">恢復追蹤</button>'
       : '<button type="button" class="btn primary" data-act="restart">'+ic(P.restart,18)+'開始下一個週期</button>' +
@@ -745,7 +748,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
           '<button type="button" class="icon-btn" data-act="delete" aria-label="刪除這筆紀錄">'+ic(P.trash)+'</button>' +
         '</div>' +
         '<div class="who"><span class="avatar lg">'+esc(initial(r.name))+'</span>' +
-          '<div><h2>'+esc(r.name)+'</h2><span class="sub"><span class="sw '+(r.status === 'done' ? 'sdone' : 's'+stageOf(r))+'"></span>'+stageText(r)+' · 第 '+(r.cycle||1)+' 次週期'+(r.status === 'done' ? ' · '+c.dayText : '')+'</span></div></div>' +
+          '<div><h2>'+esc(r.name)+'</h2><span class="sub"><span class="sw '+(r.status === 'done' ? 'sdone' : 's'+stageOf(r))+'"></span>'+stageText(r)+' · 第 '+cycleNo(r)+' 次週期'+(r.status === 'done' ? ' · '+c.dayText : '')+'</span></div></div>' +
         '<div class="hero">' +
           '<div class="ring"><svg width="124" height="124" viewBox="0 0 124 124" role="img" aria-label="'+esc(ringLabel)+'">' +
             '<circle cx="62" cy="62" r="52" fill="none" style="stroke:var(--surface2)" stroke-width="12"/>' +
@@ -778,7 +781,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
         (hist.length
           ? '<section class="d-sec"><h3>週期紀錄</h3><div class="hist">' +
               hist.map(function(h, i){
-                return '<div class="hist-row"><span>第 '+(i+1)+' 次 · '+fmtMD(parseD(h.start))+' – '+fmtMD(parseD(h.end))+'</span><span class="muted">'+(h.days||0)+' 天</span></div>';
+                return '<div class="hist-row"><span>第 '+(i+1)+' 次 · '+fmtMD(parseD(h.start))+' – '+fmtMD(parseD(h.end))+'</span><span class="muted">'+(parseInt(h.days,10)||0)+' 天</span></div>';
               }).reverse().join('') +
             '</div></section>'
           : '') +
@@ -1077,9 +1080,9 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     $('#d-ok').onclick = function(){
       var ns = $('#d-start').value, s = parseD(ns);
       if (isNaN(s)) return;
-      var cyc = (r.cycle || 1) + 1;
-      var history = (r.history || []).concat([{ start:r.start, end:ns, days:Math.max(0, diff(parseD(r.start), s)), stages:stagesOf(r) }]);
-      var notes = (r.notes || []).concat([{ id:uid(), date:ns, text:'開始第 ' + cyc + ' 次週期', t:Date.now() }]);
+      var cyc = cycleNo(r) + 1;
+      var history = arr(r.history).concat([{ start:r.start, end:ns, days:Math.max(0, diff(parseD(r.start), s)), stages:stagesOf(r) }]);
+      var notes = arr(r.notes).concat([{ id:uid(), date:ns, text:'開始第 ' + cyc + ' 次週期', t:Date.now() }]);
       closeOverlay();
       write(function(){ return docRef(r.id).update({ start:ns, cycle:cyc, history:history, notes:notes, stages:[{ s:0, date:ns }], status:'active', doneAt:null, updatedAt:Date.now() }); }, '第 ' + cyc + ' 次週期開始了');
     };
@@ -1089,10 +1092,10 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var st = stagesOf(r), e = st[idx];
     if (!e) return;
     var min = idx > 0 ? st[idx-1].date : '';
-    var max = idx + 1 < st.length ? st[idx+1].date : (r.status === 'done' && r.doneAt ? r.doneAt : ymd(todayMs()));
+    var max = idx + 1 < st.length ? st[idx+1].date : (r.status === 'done' && validDate(r.doneAt) ? r.doneAt : ymd(todayMs()));
     openOverlay(
       '<h2 class="dlg-title">修改「'+STAGES[e.s]+'」開始日期</h2>' +
-      '<div class="field"><label for="d-date">開始日期</label><input id="d-date" class="input" type="date" value="'+esc(e.date)+'"'+(min ? ' min="'+min+'"' : '')+' max="'+max+'"></div>' +
+      '<div class="field"><label for="d-date">開始日期</label><input id="d-date" class="input" type="date" value="'+esc(e.date)+'"'+(min ? ' min="'+esc(min)+'"' : '')+' max="'+esc(max)+'"></div>' +
       '<p class="err" id="d-err" role="alert"></p>' +
       '<div class="dlg-actions"><button type="button" class="btn" data-close>取消</button><button type="button" class="btn primary" id="d-ok">儲存</button></div>', 'dialog');
     $('#d-ok').onclick = function(){
@@ -1141,11 +1144,12 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     };
     $('#a-file').onchange = function(e){
       var f = e.target.files && e.target.files[0]; if (!f) return;
+      if (f.size > 5 * 1024 * 1024){ $('#a-err').textContent = '檔案太大（超過 5 MB），不像是追蹤本的備份。'; return; }
       var rd = new FileReader();
       rd.onload = function(){
         var list;
         try { var j = JSON.parse(rd.result); list = Array.isArray(j) ? j : j.records; } catch(x){ list = null; }
-        list = (list || []).filter(function(r){ return r && typeof r.name === 'string' && typeof r.start === 'string'; });
+        list = arr(list).filter(function(r){ return r && typeof r === 'object' && typeof r.name === 'string' && r.name.length <= 200 && validDate(r.start); });
         if (!list.length){ $('#a-err').textContent = '這個檔案裡沒有可以匯入的紀錄。'; return; }
         if (!S.db){ $('#a-err').textContent = '請先登入再匯入。'; return; }
         closeOverlay();
@@ -1227,7 +1231,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       write(function(){ return docRef(r.id).update({ status:'active', doneAt:null, updatedAt:Date.now() }); }, '已恢復追蹤');
     }
     else if (act === 'del-note'){
-      var prevNotes = (r.notes || []).slice(), id = a.dataset.note, rid3 = r.id;
+      var prevNotes = arr(r.notes).slice(), id = a.dataset.note, rid3 = r.id;
       var nextNotes = prevNotes.filter(function(n){ return n.id !== id; });
       write(function(){ return docRef(rid3).update({ notes:nextNotes, updatedAt:Date.now() }); }).then(function(ok){
         if (ok) toast('已刪除筆記', { label:'復原', fn:function(){ write(function(){ return docRef(rid3).update({ notes:prevNotes, updatedAt:Date.now() }); }); } });
@@ -1241,7 +1245,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var r = current(), input = $('#noteInput');
     if (!r || !input) return;
     var text = input.value.trim(); if (!text) return;
-    var notes = (r.notes || []).concat([{ id:uid(), date:ymd(todayMs()), text:text, t:Date.now() }]);
+    var notes = arr(r.notes).concat([{ id:uid(), date:ymd(todayMs()), text:text, t:Date.now() }]);
     input.value = '';
     write(function(){ return docRef(r.id).update({ notes:notes, updatedAt:Date.now() }); }).then(function(ok){
       var ni = $('#noteInput'); if (!ok && ni && !ni.value) ni.value = text;

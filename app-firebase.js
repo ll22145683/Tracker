@@ -118,7 +118,13 @@ async function start() {
 
   window.TrackerAuth = {
     email: () => (auth.currentUser && auth.currentUser.email) || '',
-    signOut: () => authMod.signOut(auth)
+    // Signing out also wipes the offline copy kept on this device, so the next person
+    // to pick it up can't read the records from the browser's storage.
+    signOut: async () => {
+      try { await authMod.signOut(auth); } catch (e) {}
+      try { await fs.terminate(firestore); await fs.clearIndexedDbPersistence(firestore); } catch (e) {}
+      location.reload();
+    }
   };
 
   authMod.onAuthStateChanged(auth, (user) => {
