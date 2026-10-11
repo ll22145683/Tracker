@@ -1,6 +1,6 @@
 // Offline support: the app files come from the network when online (so updates show up),
 // and from this cache when offline. Firebase's own data traffic is never touched here.
-const CACHE = 'tracker-v3';
+const CACHE = 'tracker-v4';
 const SHELL = ['./', './index.html', './app-firebase.js', './firebase-config.js', './manifest.webmanifest',
                './icon-192.png', './icon-512.png'];
 
