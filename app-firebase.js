@@ -69,7 +69,31 @@ function makeDb(fs, firestore, uid) {
   return { collection: () => colApi };
 }
 
+// Browsers built into chat apps (LINE, Facebook, Instagram…) block Google sign-in,
+// which shows up as a blank page after choosing an account.
+function inAppBrowser() {
+  const ua = navigator.userAgent || '';
+  if (/\bLine\//i.test(ua)) return 'LINE';
+  if (/FBAN|FBAV|FB_IAB|Messenger/i.test(ua)) return 'Facebook';
+  if (/Instagram/i.test(ua)) return 'Instagram';
+  if (/MicroMessenger/i.test(ua)) return '微信';
+  if (/; wv\)/.test(ua)) return 'App 內建';
+  return '';
+}
+
 async function start() {
+  const inApp = inAppBrowser();
+  if (inApp === 'LINE' && !/[?&]openExternalBrowser=1/.test(location.search)) {
+    // LINE opens the page in the phone's normal browser when this parameter is present.
+    const url = new URL(location.href);
+    url.searchParams.set('openExternalBrowser', '1');
+    location.replace(url.toString());
+    return;
+  }
+  if (inApp) {
+    showLogin('你現在是用' + inApp + '的瀏覽器開啟，Google 不允許在這裡登入。請點右上角選單，選「用瀏覽器開啟」（iPhone 用 Safari、安卓用 Chrome）後再登入。', false);
+    return;
+  }
   if (!firebaseConfig || !firebaseConfig.apiKey) {
     showLogin('還沒有設定 Firebase。請照 README 的步驟填好 firebase-config.js。', false);
     return;

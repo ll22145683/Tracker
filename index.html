@@ -1305,6 +1305,11 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       render();
     }, function(err){
       if (err && err.code === 'unavailable'){ showBanner('同步中斷，正在重新連線…'); setTimeout(subscribe, 3000); }
+      else if (err && err.code === 'not_granted'){
+        var who = window.TrackerAuth ? window.TrackerAuth.email() : '';
+        S.loaded = true; render();
+        showBanner('這個 Google 帳號' + (who ? '（' + who + '）' : '') + '還沒有使用權限。請管理者把這個信箱加進名單，或點右上角人像按鈕登出、換成已開通的帳號。');
+      }
       else { showBanner('同步已中斷，請重新開啟這個頁面。'); }
       S.meta = null; renderSync();
     });
