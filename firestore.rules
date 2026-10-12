@@ -1,9 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 每個 Google 帳號只能讀寫自己的紀錄
+    // 每個人只能讀寫自己的紀錄（uid 相符），而且只有清單上的 Google 帳號可以使用。
+    // 要加人或移除人：改下面的信箱清單（全部小寫），貼到 Firebase 主控台 → Firestore → 規則 → 發布。
+    // 這個儲存庫是公開的，所以這裡只放範例信箱；真正的名單只填在 Firebase 主控台。
     match /users/{uid}/records/{recordId} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid
+                         && request.auth.token.email in [
+                              'owner@example.com',
+                              'friend@example.com'
+                            ];
     }
   }
 }
