@@ -219,6 +219,11 @@ body.tab-overview .panes, body.tab-overview .fab, body.tab-overview #searchBtn, 
 .ov-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .ov-head h2{margin:0;font-size:15px;font-weight:700}
 .ov-head .muted{font-size:12px}
+.ov-bar{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;padding:2px 0 12px}
+.modeseg{display:flex;background:var(--surface2);border-radius:14px;padding:4px;gap:2px}
+.modeseg button{height:38px;padding:0 20px;border:0;border-radius:10px;background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
+.modeseg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:700;box-shadow:var(--shadow)}
+.month-label{font-size:15px !important;font-weight:700;color:var(--ink) !important;min-width:96px;text-align:center}
 .ov-stages{order:1}
 .ov-gantt{order:2;padding:12px}
 .ov-tiles{order:3;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
@@ -485,8 +490,9 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
 
   var S = { records:[], loaded:false, dbReady:false, db:null, meta:null, online:navigator.onLine,
             tab:'list', filter:'all', q:'', selectedId:null, pendingId:null, dayKey:'', lastFocus:null,
-            ganttShift:0, weekPick:null };
-  try { var savedTab = localStorage.getItem('tracker.tab'); if (savedTab === 'overview') S.tab = 'overview'; } catch(e){}
+            ganttShift:0, weekPick:null, ovMode:'month', monthShift:0 };
+  try { var savedTab = localStorage.getItem('tracker.tab'); if (savedTab === 'overview') S.tab = 'overview';
+        if (localStorage.getItem('tracker.ovMode') === 'all') S.ovMode = 'all'; } catch(e){}
 
   /* ---------- dates (all as UTC midnight ms) ---------- */
   function p2(n){ return String(n).padStart(2,'0'); }
@@ -818,83 +824,116 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var el = $('#overview');
     if (!S.loaded){ el.innerHTML = '<p class="hint">載入中…</p>'; return; }
     if (!S.records.length){
-      el.innerHTML = '<div class="empty"><strong>還沒有任何紀錄</strong><span>新增紀錄之後，這裡會出現時間軸和每週統計。</span>' +
+      el.innerHTML = '<div class="empty"><strong>還沒有任何紀錄</strong><span>新增紀錄之後，這裡會出現時間軸和統計。</span>' +
         (S.db ? '<button type="button" class="btn primary" data-act="add">'+ic(P.plus,18,2.2)+'新增紀錄</button>' : '') + '</div>';
       return;
     }
-    var T = todayMs(), wide = wideMQ.matches;
+    var T = todayMs(), wide = wideMQ.matches, monthMode = S.ovMode !== 'all';
     var items = S.records.map(function(r){ return { r:r, c:compute(r) }; });
     var active = items.filter(function(x){ return x.r.status !== 'done'; });
-    var doneN = items.length - active.length;
-
-    /* stage counts */
-    var counts = [0,0,0,0];
     var main = active.filter(function(x){ return !isReserve(x.r); });
     var spareN = active.length - main.length;
-    main.forEach(function(x){ counts[stageOf(x.r)]++; });
-    var legendItems = STAGES.map(function(n, i){ return '<span><i class="sw s'+i+'"></i>'+n+' <b>'+counts[i]+'</b></span>'; }).join('') +
-      (spareN ? '<span><i class="sw sres"></i>備用 <b>'+spareN+'</b></span>' : '') +
-      '<span><i class="sw sdone"></i>已完成 <b>'+doneN+'</b></span>';
-    var stagesCard = '<section class="ov-card ov-stages"><div class="ov-head"><h2>目前階段</h2><span class="muted">進行中 '+main.length+' 人</span></div>' +
-      '<div class="legend">'+legendItems+'</div></section>';
+    var doneN = items.length - active.length;
+    var tNow = new Date(T), curY = tNow.getUTCFullYear(), curM = tNow.getUTCMonth();
 
-    /* weekly stats */
-    var mon = mondayOf(T), weeks = [];
-    for (var i = 7; i >= 0; i--){
-      var ws = mon - i*7*DAY, we = ws + 7*DAY, D = Math.min(we - DAY, T);
-      var by = [0,0,0,0], started = 0, finished = 0;
+    /* one statistics bucket = the period [bs, be); "who is in progress" is read at its last day (or today) */
+    function bucket(bs, be){
+      var D = Math.min(be - DAY, T), by = [0,0,0,0], byMain = [0,0,0,0], started = 0, finished = 0, due = 0, over = 0;
       S.records.forEach(function(r){
+        var res = isReserve(r);
         cyclesOf(r).forEach(function(cy){
-          if (cy.start <= D && D < cy.stop) by[stageAt(cy, D)]++;
-          if (cy.start >= ws && cy.start < we) started++;
-          if (cy.done && !cy.hist && cy.stop >= ws && cy.stop < we) finished++;
+          if (cy.start <= D && D < cy.stop){
+            var st = stageAt(cy, D); by[st]++;
+            if (!res){ byMain[st]++; if (!cy.hist && cy.planned < D) over++; }
+          }
+          if (cy.start >= bs && cy.start < be) started++;
+          if (cy.done && !cy.hist && cy.stop >= bs && cy.stop < be) finished++;
+          if (!cy.hist && !res && cy.planned >= bs && cy.planned < be) due++;
         });
       });
-      weeks.push({ ws:ws, by:by, total:by[0]+by[1]+by[2]+by[3], started:started, finished:finished, cur:i === 0 });
+      return { bs:bs, be:be, by:by, byMain:byMain, total:by[0]+by[1]+by[2]+by[3], started:started, finished:finished, due:due, over:over };
     }
-    var maxT = Math.max(1, Math.max.apply(null, weeks.map(function(w){ return w.total; })));
-    var thisW = weeks[7], lastW = weeks[6];
-    var pick = S.weekPick != null ? weeks.filter(function(w){ return w.ws === S.weekPick; })[0] : null;
-    function weekDesc(w){
-      var parts = STAGES.map(function(n, i){ return w.by[i] ? n + ' ' + w.by[i] : ''; }).filter(Boolean).join('、');
-      return (w.cur ? '本週' : fmtShort(w.ws) + ' 那週') + '：' + w.total + ' 人進行中' + (parts ? '（' + parts + '）' : '') +
-        '，新開始 ' + w.started + '、完成 ' + w.finished + '。';
+    function sum(a){ return a[0]+a[1]+a[2]+a[3]; }
+    function monthName(ms){ var d = new Date(ms); return (d.getUTCFullYear() !== curY ? d.getUTCFullYear() + '年' : '') + (d.getUTCMonth()+1) + '月'; }
+
+    /* period being looked at */
+    var ms = Date.UTC(curY, curM + S.monthShift, 1), me = Date.UTC(curY, curM + S.monthShift + 1, 1);
+    var isCurMonth = S.monthShift === 0, mLabel = new Date(ms).getUTCFullYear() + '年' + (new Date(ms).getUTCMonth()+1) + '月';
+    var M = bucket(ms, me), mWord = isCurMonth ? '本月' : (new Date(ms).getUTCMonth()+1) + '月';
+
+    /* chart buckets: weeks of the month, or the last 12 months */
+    var buckets = [], unitWord;
+    if (monthMode){
+      unitWord = '週';
+      for (var ws = mondayOf(ms); ws < me && ws <= T; ws += 7*DAY){
+        var b = bucket(ws, ws + 7*DAY); b.label = ws === mondayOf(T) ? '本週' : fmtShort(ws); b.name = ws === mondayOf(T) ? '本週' : fmtShort(ws) + ' 那週'; b.cur = ws === mondayOf(T);
+        buckets.push(b);
+      }
+    } else {
+      unitWord = '月';
+      var first = T;
+      S.records.forEach(function(r){ cyclesOf(r).forEach(function(cy){ if (cy.start < first) first = cy.start; }); });
+      var fd = new Date(first), span = (curY - fd.getUTCFullYear()) * 12 + curM - fd.getUTCMonth();
+      for (var i = Math.min(span, 11); i >= 0; i--){
+        var bs = Date.UTC(curY, curM - i, 1), b2 = bucket(bs, Date.UTC(curY, curM - i + 1, 1));
+        b2.label = i === 0 ? '本月' : monthName(bs); b2.name = i === 0 ? '本月' : monthName(bs); b2.cur = i === 0;
+        buckets.push(b2);
+      }
     }
-    var capText = pick ? weekDesc(pick)
-      : weekDesc(thisW) + (thisW.total === lastW.total ? '和上週一樣。' : '比上週' + (thisW.total > lastW.total ? '多 ' : '少 ') + Math.abs(thisW.total - lastW.total) + ' 人。');
-    var plot = weeks.map(function(w){
+    var maxT = Math.max(1, Math.max.apply(null, buckets.map(function(b){ return b.total; }).concat([0])));
+    var pick = S.weekPick != null ? buckets.filter(function(b){ return b.bs === S.weekPick; })[0] : null;
+    function desc(b){
+      var parts = STAGES.map(function(n, i){ return b.by[i] ? n + ' ' + b.by[i] : ''; }).filter(Boolean).join('、');
+      return b.name + '：' + b.total + ' 人進行中' + (parts ? '（' + parts + '）' : '') + '，新開始 ' + b.started + '、完成 ' + b.finished + '。';
+    }
+    var capText;
+    if (pick) capText = desc(pick);
+    else if (!buckets.length) capText = '這個月還沒開始。';
+    else {
+      var lastB = buckets[buckets.length-1], prevB = buckets[buckets.length-2];
+      capText = desc(lastB) + (prevB ? (lastB.total === prevB.total ? '和上一' + unitWord + '一樣。' : '比上一' + unitWord + (lastB.total > prevB.total ? '多 ' : '少 ') + Math.abs(lastB.total - prevB.total) + ' 人。') : '');
+    }
+    var plot = buckets.map(function(b){
       var segs = '';
-      for (var s = 3; s >= 0; s--) if (w.by[s]) segs += '<i class="s'+s+'" style="flex:'+w.by[s]+' 1 0"></i>';
-      return '<button type="button" class="wk-col" data-week="'+w.ws+'" aria-pressed="'+(pick === w)+'" aria-label="'+esc(weekDesc(w))+'" title="'+esc(weekDesc(w))+'">' +
-        '<span class="wk-total">'+w.total+'</span>' +
-        '<span class="wk-stack" style="height:calc((100% - 18px) * '+(w.total/maxT).toFixed(3)+')">'+segs+'</span></button>';
+      for (var s = 3; s >= 0; s--) if (b.by[s]) segs += '<i class="s'+s+'" style="flex:'+b.by[s]+' 1 0"></i>';
+      return '<button type="button" class="wk-col" data-week="'+b.bs+'" aria-pressed="'+(pick === b)+'" aria-label="'+esc(desc(b))+'" title="'+esc(desc(b))+'">' +
+        '<span class="wk-total">'+b.total+'</span>' +
+        '<span class="wk-stack" style="height:calc((100% - 18px) * '+(b.total/maxT).toFixed(3)+')">'+segs+'</span></button>';
     }).join('');
-    var xl = weeks.map(function(w){ return '<span class="'+(w.cur ? 'cur' : '')+'">'+(w.cur ? '本週' : fmtShort(w.ws))+'</span>'; }).join('');
-    var weeklyCard = '<section class="ov-card ov-weekly"><div class="ov-head"><h2>每週人數</h2><span class="muted">依當週所在階段</span></div>' +
-      '<div class="wk-plot">'+plot+'</div><div class="wk-x">'+xl+'</div>' +
+    var xl = buckets.map(function(b){ return '<span class="'+(b.cur ? 'cur' : '')+'">'+b.label+'</span>'; }).join('');
+    var chartCard = '<section class="ov-card ov-weekly"><div class="ov-head"><h2>'+(monthMode ? '每週人數' : '每月人數')+'</h2><span class="muted">'+
+        (monthMode ? mLabel + '・依當週所在階段' : '最近 ' + buckets.length + ' 個月・依當月所在階段')+'</span></div>' +
+      (buckets.length ? '<div class="wk-plot">'+plot+'</div><div class="wk-x">'+xl+'</div>' : '') +
       '<div class="legend" style="font-size:12px">'+STAGES.map(function(n, i){ return '<span><i class="sw s'+i+'"></i>'+n+'</span>'; }).join('')+'</div>' +
       '<p class="wk-cap">'+esc(capText)+'</p></section>';
 
-    /* tiles */
-    var dueSoon = main.filter(function(x){ return x.c.remaining <= 7; }).sort(byRem);
-    var soonN = dueSoon.filter(function(x){ return x.c.remaining >= 0; }).length;
-    var overN = main.filter(function(x){ return x.c.remaining < 0; }).length;
-    var tiles = '<div class="ov-tiles">' +
-      '<div class="tile"><span>本週新開始</span><b>'+thisW.started+'</b></div>' +
-      '<div class="tile"><span>本週完成</span><b>'+thisW.finished+'</b></div>' +
-      '<div class="tile"><span>7 天內到期</span><b>'+soonN+'</b></div>' +
-      '<div class="tile"><span>'+(overN ? '<span style="color:var(--over);display:inline-flex">'+ic(P.warn,13,2.4)+'</span>' : '')+'逾期</span><b>'+overN+'</b></div>' +
-    '</div>';
+    /* stage card + tiles */
+    var counts = monthMode ? M.byMain : [0,0,0,0];
+    if (!monthMode) main.forEach(function(x){ counts[stageOf(x.r)]++; });
+    var stageTitle = monthMode && !isCurMonth ? (new Date(ms).getUTCMonth()+1) + '月底的階段' : '目前階段';
+    var legendItems = STAGES.map(function(n, i){ return '<span><i class="sw s'+i+'"></i>'+n+' <b>'+counts[i]+'</b></span>'; }).join('') +
+      (spareN && (!monthMode || isCurMonth) ? '<span><i class="sw sres"></i>備用 <b>'+spareN+'</b></span>' : '') +
+      (monthMode ? '<span><i class="sw sdone"></i>'+mWord+'完成 <b>'+M.finished+'</b></span>' : '<span><i class="sw sdone"></i>已完成 <b>'+doneN+'</b></span>');
+    var stagesCard = '<section class="ov-card ov-stages"><div class="ov-head"><h2>'+stageTitle+'</h2><span class="muted">進行中 '+sum(counts)+' 人</span></div>' +
+      '<div class="legend">'+legendItems+'</div></section>';
 
-    /* gantt */
-    var back = wide ? 5 : 2, DAYS = wide ? 70 : 35;
-    var W0 = mon - back*7*DAY + S.ganttShift*7*DAY, W1 = W0 + DAYS*DAY;
+    var dueSoon = main.filter(function(x){ return x.c.remaining <= 7; }).sort(byRem);
+    var overNow = main.filter(function(x){ return x.c.remaining < 0; }).length;
+    function tile(label, n, warn){
+      return '<div class="tile"><span>'+(warn && n ? '<span style="color:var(--over);display:inline-flex">'+ic(P.warn,13,2.4)+'</span>' : '')+label+'</span><b>'+n+'</b></div>';
+    }
+    var tiles = '<div class="ov-tiles">' + (monthMode
+      ? tile(mWord + '新開始', M.started) + tile(mWord + '完成', M.finished) + tile(mWord + '到期', M.due) + tile(isCurMonth ? '逾期' : '月底逾期', M.over, true)
+      : tile('全部紀錄', items.length) + tile('進行中', main.length) + tile('已完成', doneN) + tile('逾期', overNow, true)) + '</div>';
+
+    /* gantt: the whole month, or a rolling window of weeks */
+    var mon = mondayOf(T), W0, W1, DAYS;
+    if (monthMode){ W0 = ms; W1 = me; DAYS = diff(ms, me); }
+    else { var back = wide ? 5 : 2; DAYS = wide ? 70 : 35; W0 = mon - back*7*DAY + S.ganttShift*7*DAY; W1 = W0 + DAYS*DAY; }
     function pc(t){ return (t - W0) / (W1 - W0) * 100; }
     var rows = items.map(function(x){
       var cys = cyclesOf(x.r);
-      var last = cys[cys.length-1];
-      var barEnd = last.done ? last.stop : Math.max(last.planned, T);
-      return { x:x, cys:cys, last:last, barEnd:barEnd };
+      return { x:x, cys:cys, last:cys[cys.length-1] };
     }).filter(function(o){
       return o.cys.some(function(cy){ var e = cy.done ? cy.stop : Math.max(cy.planned, T); return cy.start < W1 && e > W0; });
     }).sort(function(a, b){
@@ -906,16 +945,17 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       return byRem(a.x, b.x);
     });
     var ticks = '', months = '', weekends = '';
-    for (var k = 0; k * 7 < DAYS; k++){
-      var tk = W0 + k*7*DAY;
+    var tick0 = monthMode ? mondayOf(W0) + (mondayOf(W0) < W0 ? 7*DAY : 0) : W0;
+    for (var tk = tick0; tk < W1; tk += 7*DAY){
       ticks += '<span class="g-tick" style="left:'+pc(tk).toFixed(2)+'%"></span><span class="g-tl" style="left:'+pc(tk).toFixed(2)+'%">'+fmtShort(tk)+'</span>';
     }
     if (wide){
       for (var dd = 0; dd < DAYS; dd++){
         var dt = W0 + dd*DAY, wdn = new Date(dt).getUTCDay();
         if (wdn === 6 || wdn === 0) weekends += '<span class="g-weekend" style="left:'+pc(dt).toFixed(2)+'%;width:'+(100/DAYS).toFixed(2)+'%"></span>';
-        if (new Date(dt).getUTCDate() === 1) months += '<span class="g-month" style="left:'+pc(dt).toFixed(2)+'%">'+(new Date(dt).getUTCMonth()+1)+'月</span>';
+        if (!monthMode && new Date(dt).getUTCDate() === 1) months += '<span class="g-month" style="left:'+pc(dt).toFixed(2)+'%">'+(new Date(dt).getUTCMonth()+1)+'月</span>';
       }
+      if (monthMode) months = '<span class="g-month" style="left:0">'+mLabel+'</span>';
     }
     var names = '', bars = '';
     rows.forEach(function(o, i){
@@ -929,33 +969,43 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       if (lx > 0 && lx < 86) inner += '<span class="g-label" style="left:'+lx.toFixed(2)+'%">'+c.short+'</span>';
       bars += '<button type="button" class="g-row'+(isReserve(r) ? ' res' : '')+'" data-open="'+esc(r.id)+'" title="'+esc(tip)+'" aria-label="'+esc(tip)+'" style="top:calc(var(--ghead) + var(--grow) * '+i+')">'+inner+'</button>';
     });
-    var todayIn = T >= W0 && T < W1;
-    var tp = pc(T).toFixed(2);
-    var gantt = '<section class="ov-card ov-gantt"><div class="ov-head"><h2 style="padding-left:4px">進度時間軸</h2>' +
-      '<div class="g-nav">'+(S.ganttShift ? '<button type="button" class="btn sm" data-act="g-today">回到今天</button>' : '') +
-        '<button type="button" class="icon-btn" data-act="g-prev" aria-label="往前一週">'+ic(P.back,18)+'</button>' +
-        '<span class="range">'+fmtShort(W0)+' – '+fmtShort(W1 - DAY)+'</span>' +
-        '<button type="button" class="icon-btn" data-act="g-next" aria-label="往後一週">'+ic(P.fwd,18)+'</button></div></div>' +
+    var todayIn = T >= W0 && T < W1, tp = pc(T).toFixed(2);
+    var gNav = monthMode ? '<span class="muted" style="font-size:12px">'+mLabel+'</span>'
+      : '<div class="g-nav">'+(S.ganttShift ? '<button type="button" class="btn sm" data-act="g-today">回到今天</button>' : '') +
+          '<button type="button" class="icon-btn" data-act="g-prev" aria-label="往前一週">'+ic(P.back,18)+'</button>' +
+          '<span class="range">'+fmtShort(W0)+' – '+fmtShort(W1 - DAY)+'</span>' +
+          '<button type="button" class="icon-btn" data-act="g-next" aria-label="往後一週">'+ic(P.fwd,18)+'</button></div>';
+    var gantt = '<section class="ov-card ov-gantt"><div class="ov-head"><h2 style="padding-left:4px">進度時間軸</h2>' + gNav + '</div>' +
       (rows.length
         ? '<div class="gantt"><div class="g-names">'+names+'</div>' +
             '<div class="g-track" style="height:calc(var(--ghead) + var(--grow) * '+rows.length+')">'+weekends+ticks+months+bars +
               (todayIn ? '<span class="today-line" style="left:'+tp+'%"></span><span class="today-tag" style="left:'+tp+'%">今天</span>' : '') +
             '</div></div>'
-        : '<p class="hint">這段期間沒有紀錄，可以往前或往後翻看看。</p>') +
+        : '<p class="hint">'+(monthMode ? '這個月沒有紀錄。' : '這段期間沒有紀錄，可以往前或往後翻看看。')+'</p>') +
       '<div class="g-legend">'+STAGES.map(function(n, i){ return '<span><i class="k s'+i+'"></i>'+n+'</span>'; }).join('') +
         '<span><i class="k sdone"></i>已完成</span><span><i class="k s1" style="opacity:.45"></i>備用（淡色）</span><span><i class="e"></i>到期日</span><span><i class="k sfut"></i>還沒走完</span><span><i class="k sover"></i>逾期</span></div>' +
     '</section>';
 
-    var dueCard = '<section class="ov-card ov-due"><div class="ov-head"><h2>7 天內到期</h2><span class="muted">含已逾期</span></div>' +
+    var dueCard = (!monthMode || isCurMonth) ? '<section class="ov-card ov-due"><div class="ov-head"><h2>7 天內到期</h2><span class="muted">含已逾期</span></div>' +
       (dueSoon.length
         ? '<div class="due-list">'+dueSoon.map(function(x){
             return '<button type="button" class="due-item t-'+x.c.tone+'" data-open="'+esc(x.r.id)+'"><b>'+esc(x.r.name)+'</b><span>'+
               (x.c.remaining < 0 ? x.c.short + ' · ' + stageText(x.r) : fmtShort(x.c.end) + ' · ' + x.c.short)+'</span></button>';
           }).join('')+'</div>'
         : '<p class="hint" style="padding:0">7 天內沒有人到期。</p>') +
-    '</section>';
+    '</section>' : '';
 
-    el.innerHTML = '<div class="ov"><div class="ov-l">' + gantt + dueCard + '</div><div class="ov-r">' + stagesCard + tiles + weeklyCard + '</div></div>';
+    var bar = '<div class="ov-bar"><div class="modeseg" role="group" aria-label="統計範圍">' +
+        '<button type="button" data-ovmode="month" aria-pressed="'+monthMode+'">本月</button>' +
+        '<button type="button" data-ovmode="all" aria-pressed="'+(!monthMode)+'">全部</button></div>' +
+      (monthMode ? '<div class="g-nav"><button type="button" class="icon-btn" data-act="m-prev" aria-label="上個月">'+ic(P.back,18)+'</button>' +
+          '<span class="range month-label">'+mLabel+'</span>' +
+          '<button type="button" class="icon-btn" data-act="m-next" aria-label="下個月">'+ic(P.fwd,18)+'</button>' +
+          (isCurMonth ? '' : '<button type="button" class="btn sm" data-act="m-today">回到本月</button>') + '</div>'
+        : '<span class="muted" style="font-size:13px">所有紀錄的統計</span>') +
+      '</div>';
+
+    el.innerHTML = bar + '<div class="ov"><div class="ov-l">' + gantt + dueCard + '</div><div class="ov-r">' + stagesCard + tiles + chartCard + '</div></div>';
   }
 
   /* ---------- feedback ---------- */
@@ -1210,6 +1260,8 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     if (o){ S.selectedId = o.dataset.open; S.tab = 'list'; saveTab(); render(); $('#detailPane').scrollTop = 0; return; }
     var wk = e.target.closest('[data-week]');
     if (wk){ var w = +wk.dataset.week; S.weekPick = S.weekPick === w ? null : w; renderOverview(); return; }
+    var om = e.target.closest('[data-ovmode]');
+    if (om){ S.ovMode = om.dataset.ovmode; S.weekPick = null; try { localStorage.setItem('tracker.ovMode', S.ovMode); } catch(x){} renderOverview(); return; }
     var f = e.target.closest('[data-filter]');
     if (f){ S.filter = f.dataset.filter; renderList(); return; }
     var a = e.target.closest('[data-act]');
@@ -1220,6 +1272,9 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     else if (act === 'g-prev'){ S.ganttShift--; renderOverview(); }
     else if (act === 'g-next'){ S.ganttShift++; renderOverview(); }
     else if (act === 'g-today'){ S.ganttShift = 0; renderOverview(); }
+    else if (act === 'm-prev'){ S.monthShift--; S.weekPick = null; renderOverview(); }
+    else if (act === 'm-next'){ S.monthShift++; S.weekPick = null; renderOverview(); }
+    else if (act === 'm-today'){ S.monthShift = 0; S.weekPick = null; renderOverview(); }
     else if (act === 'search'){
       var row = $('#searchRow'); row.hidden = !row.hidden;
       a.setAttribute('aria-expanded', String(!row.hidden));
