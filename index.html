@@ -152,6 +152,13 @@ body.tab-overview .panes, body.tab-overview .fab, body.tab-overview #searchBtn, 
 .check-row{display:flex;align-items:center;gap:10px;min-height:44px;font-size:15px;cursor:pointer}
 .check-row input{width:20px;height:20px;accent-color:var(--accent);flex-shrink:0}
 .g-row.res .seg{opacity:.45}
+.g-row.inv .seg{opacity:.3;filter:grayscale(1)}
+.pill-x{color:var(--over);background:var(--over-soft)}
+.sinv{background:repeating-linear-gradient(135deg,var(--muted) 0 1.5px,transparent 1.5px 4px);box-shadow:inset 0 0 0 1.5px var(--muted)}
+.switches{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:12px}
+.switches .switch-row{margin-top:0}
+.switch-row:disabled{opacity:.55;cursor:default}
+@media (min-width:600px){ .switches{grid-template-columns:repeat(2,minmax(0,1fr))} }
 
 .detail{max-width:760px}
 .d-top{display:flex;align-items:center;gap:2px;padding:8px 0 4px;margin-left:-8px}
@@ -535,7 +542,9 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     return st.length ? st.map(function(e){ return { s:+e.s, date:e.date }; }) : [{ s:0, date:r.start }];
   }
   function stageOf(r){ var st = stagesOf(r); return st[st.length-1].s; }
-  function isReserve(r){ return r.reserve === true && r.status !== 'done'; }
+  function isInvalid(r){ return r.invalid === true && r.status !== 'done'; }
+  function isReserve(r){ return r.reserve === true && r.status !== 'done' && !isInvalid(r); }
+  function laneTag(r){ return isInvalid(r) ? '失效' : isReserve(r) ? '備用' : ''; }
   function stageText(r){ return r.status === 'done' ? '已完成' : STAGES[stageOf(r)]; }
 
   function compute(r){
@@ -555,13 +564,13 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       c.dayText = '尚未開始'; c.progress = '尚未開始'; c.short = (-elapsed) + ' 天後開始';
     } else if (remaining < 0){
       c.tone = 'over'; c.num = String(-remaining); c.label = '天・已逾期';
-      c.dayText = '週期已結束'; c.progress = '已過 ' + elapsed + ' 天'; c.attention = !isReserve(r); c.short = '逾期 ' + (-remaining) + ' 天';
+      c.dayText = '週期已結束'; c.progress = '已過 ' + elapsed + ' 天'; c.attention = !isReserve(r) && !isInvalid(r); c.short = '逾期 ' + (-remaining) + ' 天';
     } else if (remaining === 0){
       c.tone = 'soon'; c.num = '今天'; c.label = '到期';
-      c.dayText = '今天是到期日'; c.progress = '第 ' + total + ' 天已滿'; c.attention = !isReserve(r); c.short = '今天到期';
+      c.dayText = '今天是到期日'; c.progress = '第 ' + total + ' 天已滿'; c.attention = !isReserve(r) && !isInvalid(r); c.short = '今天到期';
     } else {
       c.tone = remaining <= remindOf(r) ? 'soon' : 'ok';
-      c.attention = c.tone === 'soon' && !isReserve(r);
+      c.attention = c.tone === 'soon' && !isReserve(r) && !isInvalid(r);
       c.num = String(remaining); c.label = '天後到期';
       c.dayText = '第 ' + (elapsed+1) + ' 天 / 共 ' + total + ' 天';
       c.progress = '第 ' + (elapsed+1) + ' 天'; c.short = '剩 ' + remaining + ' 天';
@@ -639,7 +648,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var r = x.r, c = x.c, done = r.status === 'done';
     return '<button type="button" class="card t-'+c.tone+'" data-open="'+esc(r.id)+'" aria-current="'+(r.id === S.selectedId)+'">' +
       '<span class="avatar">'+esc(initial(r.name))+'</span>' +
-      '<span class="card-main"><span class="name-row"><span class="name">'+esc(r.name)+'</span>'+(isReserve(r) ? '<span class="pill-r">備用</span>' : '')+'</span>' +
+      '<span class="card-main"><span class="name-row"><span class="name">'+esc(r.name)+'</span>'+(isInvalid(r) ? '<span class="pill-r pill-x">失效</span>' : isReserve(r) ? '<span class="pill-r">備用</span>' : '')+'</span>' +
         '<span class="meta"><span class="sw '+(done ? 'sdone' : 's'+stageOf(r))+'"></span><span>'+stageText(r)+' · '+fmtMD(c.start)+' 開始 · '+esc(periodText(r))+'</span></span></span>' +
       '<span class="count">'+(c.num ? '<span class="num">'+esc(c.num)+'</span>' : '')+'<span class="badge">'+c.label+'</span></span>' +
       '<span class="bar"><span style="width:'+(c.tone === 'done' || c.tone === 'over' ? 100 : c.pct).toFixed(1)+'%"></span></span>' +
@@ -662,8 +671,9 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     });
     var active = rs.filter(function(x){ return x.r.status !== 'done'; });
     var att = active.filter(function(x){ return x.c.attention; }).sort(byRem);
-    var rest = active.filter(function(x){ return !x.c.attention && !isReserve(x.r); }).sort(byRem);
+    var rest = active.filter(function(x){ return !x.c.attention && !isReserve(x.r) && !isInvalid(x.r); }).sort(byRem);
     var spare = active.filter(function(x){ return isReserve(x.r); }).sort(byRem);
+    var voided = active.filter(function(x){ return isInvalid(x.r); }).sort(byRem);
     var done = rs.filter(function(x){ return x.r.status === 'done'; })
       .sort(function(a, b){ return String(b.r.doneAt||'').localeCompare(String(a.r.doneAt||'')); });
 
@@ -684,6 +694,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       if (att.length) h += sec('需要注意', att, true);
       if (rest.length) h += sec('進行中', rest);
       if (spare.length) h += sec('備用', spare);
+      if (voided.length) h += sec('失效', voided);
       if (!h) h = none(q ? '沒有符合搜尋的紀錄' : '目前沒有進行中的紀錄');
     } else if (S.filter === 'attention'){
       h = att.length ? sec('', att, true) : none(q ? '沒有符合搜尋的紀錄' : '目前沒有快到期或逾期的紀錄。');
@@ -772,7 +783,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
           '<button type="button" class="icon-btn" data-act="delete" aria-label="刪除這筆紀錄">'+ic(P.trash)+'</button>' +
         '</div>' +
         '<div class="who"><span class="avatar lg">'+esc(initial(r.name))+'</span>' +
-          '<div><h2>'+esc(r.name)+'</h2><span class="sub"><span class="sw '+(r.status === 'done' ? 'sdone' : 's'+stageOf(r))+'"></span>'+stageText(r)+(isReserve(r) ? ' · 備用' : '')+' · 第 '+cycleNo(r)+' 次週期'+(r.status === 'done' ? ' · '+c.dayText : '')+'</span></div></div>' +
+          '<div><h2>'+esc(r.name)+'</h2><span class="sub"><span class="sw '+(r.status === 'done' ? 'sdone' : 's'+stageOf(r))+'"></span>'+stageText(r)+(laneTag(r) ? ' · ' + laneTag(r) : '')+' · 第 '+cycleNo(r)+' 次週期'+(r.status === 'done' ? ' · '+c.dayText : '')+'</span></div></div>' +
         '<div class="hero">' +
           '<div class="ring"><svg width="124" height="124" viewBox="0 0 124 124" role="img" aria-label="'+esc(ringLabel)+'">' +
             '<circle cx="62" cy="62" r="52" fill="none" style="stroke:var(--surface2)" stroke-width="12"/>' +
@@ -791,8 +802,12 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
         '</div>' +
         '<div class="actions">'+acts+'</div>' +
         (r.status !== 'done'
-          ? '<button type="button" class="switch-row" role="switch" data-act="reserve" aria-checked="'+isReserve(r)+'">' +
-              '<span class="txt"><b>設為備用</b><small>開啟後排到清單最下面，也不會出現在「需要注意」。</small></span><span class="switch" aria-hidden="true"></span></button>'
+          ? '<div class="switches">' +
+              '<button type="button" class="switch-row" role="switch" data-act="reserve" aria-checked="'+(r.reserve === true)+'"'+(isInvalid(r) ? ' disabled' : '')+'>' +
+                '<span class="txt"><b>備用</b><small>'+(isInvalid(r) ? '已失效，先取消失效才會生效。' : '排到最下面，不列入「需要注意」。')+'</small></span><span class="switch" aria-hidden="true"></span></button>' +
+              '<button type="button" class="switch-row" role="switch" data-act="invalid" aria-checked="'+isInvalid(r)+'">' +
+                '<span class="txt"><b>失效</b><small>移到「失效」區，天數照算，但不列入提醒和統計。</small></span><span class="switch" aria-hidden="true"></span></button>' +
+            '</div>'
           : '') +
         stepsHTML(r) +
         '<section class="d-sec"><h3>筆記</h3>' +
@@ -831,8 +846,9 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var T = todayMs(), wide = wideMQ.matches, monthMode = S.ovMode !== 'all';
     var items = S.records.map(function(r){ return { r:r, c:compute(r) }; });
     var active = items.filter(function(x){ return x.r.status !== 'done'; });
-    var main = active.filter(function(x){ return !isReserve(x.r); });
-    var spareN = active.length - main.length;
+    var main = active.filter(function(x){ return !isReserve(x.r) && !isInvalid(x.r); });
+    var spareN = active.filter(function(x){ return isReserve(x.r); }).length;
+    var invN = active.filter(function(x){ return isInvalid(x.r); }).length;
     var doneN = items.length - active.length;
     var tNow = new Date(T), curY = tNow.getUTCFullYear(), curM = tNow.getUTCMonth();
 
@@ -840,6 +856,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     function bucket(bs, be){
       var D = Math.min(be - DAY, T), by = [0,0,0,0], byMain = [0,0,0,0], started = 0, finished = 0, due = 0, over = 0;
       S.records.forEach(function(r){
+        if (isInvalid(r)) return;
         var res = isReserve(r);
         cyclesOf(r).forEach(function(cy){
           if (cy.start <= D && D < cy.stop){
@@ -913,6 +930,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var stageTitle = monthMode && !isCurMonth ? (new Date(ms).getUTCMonth()+1) + '月底的階段' : '目前階段';
     var legendItems = STAGES.map(function(n, i){ return '<span><i class="sw s'+i+'"></i>'+n+' <b>'+counts[i]+'</b></span>'; }).join('') +
       (spareN && (!monthMode || isCurMonth) ? '<span><i class="sw sres"></i>備用 <b>'+spareN+'</b></span>' : '') +
+      (invN && (!monthMode || isCurMonth) ? '<span><i class="sw sinv"></i>失效 <b>'+invN+'</b></span>' : '') +
       (monthMode ? '<span><i class="sw sdone"></i>'+mWord+'完成 <b>'+M.finished+'</b></span>' : '<span><i class="sw sdone"></i>已完成 <b>'+doneN+'</b></span>');
     var stagesCard = '<section class="ov-card ov-stages"><div class="ov-head"><h2>'+stageTitle+'</h2><span class="muted">進行中 '+sum(counts)+' 人</span></div>' +
       '<div class="legend">'+legendItems+'</div></section>';
@@ -940,8 +958,8 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       var ad = a.x.r.status === 'done', bd = b.x.r.status === 'done';
       if (ad !== bd) return ad ? 1 : -1;
       if (ad) return b.last.stop - a.last.stop;
-      var ar = isReserve(a.x.r), br = isReserve(b.x.r);
-      if (ar !== br) return ar ? 1 : -1;
+      var ar = isInvalid(a.x.r) ? 2 : isReserve(a.x.r) ? 1 : 0, br = isInvalid(b.x.r) ? 2 : isReserve(b.x.r) ? 1 : 0;
+      if (ar !== br) return ar - br;
       return byRem(a.x, b.x);
     });
     var ticks = '', months = '', weekends = '';
@@ -960,14 +978,14 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     var names = '', bars = '';
     rows.forEach(function(o, i){
       var r = o.x.r, c = o.x.c, isDone = r.status === 'done';
-      var tip = r.name + '・' + stageText(r) + (isReserve(r) ? '・備用' : '') + '・' + fmtShort(c.start) + '–' + fmtShort(c.end) + '・' + c.short;
+      var tip = r.name + '・' + stageText(r) + (laneTag(r) ? '・' + laneTag(r) : '') + '・' + fmtShort(c.start) + '–' + fmtShort(c.end) + '・' + c.short;
       names += '<button type="button" class="g-name t-'+c.tone+'" data-open="'+esc(r.id)+'" title="'+esc(tip)+'">' +
-        '<span class="av">'+esc(initial(r.name))+'</span><span class="nm"><b>'+esc(r.name)+'</b><small>'+stageText(r)+(isReserve(r) ? '・備用' : '')+'</small></span></button>';
+        '<span class="av">'+esc(initial(r.name))+'</span><span class="nm"><b>'+esc(r.name)+'</b><small>'+stageText(r)+(laneTag(r) ? '・' + laneTag(r) : '')+'</small></span></button>';
       var inner = o.cys.map(function(cy){ return cycleSegs(cy, W0, W1); }).join('');
       if (!isDone && c.end >= W0 && c.end < W1) inner += '<span class="g-end" style="left:'+pc(c.end).toFixed(2)+'%"></span>';
       var lx = pc(isDone ? o.last.stop : Math.max(c.end, T)) + 1.2;
       if (lx > 0 && lx < 86) inner += '<span class="g-label" style="left:'+lx.toFixed(2)+'%">'+c.short+'</span>';
-      bars += '<button type="button" class="g-row'+(isReserve(r) ? ' res' : '')+'" data-open="'+esc(r.id)+'" title="'+esc(tip)+'" aria-label="'+esc(tip)+'" style="top:calc(var(--ghead) + var(--grow) * '+i+')">'+inner+'</button>';
+      bars += '<button type="button" class="g-row'+(isInvalid(r) ? ' inv' : isReserve(r) ? ' res' : '')+'" data-open="'+esc(r.id)+'" title="'+esc(tip)+'" aria-label="'+esc(tip)+'" style="top:calc(var(--ghead) + var(--grow) * '+i+')">'+inner+'</button>';
     });
     var todayIn = T >= W0 && T < W1, tp = pc(T).toFixed(2);
     var gNav = monthMode ? '<span class="muted" style="font-size:12px">'+mLabel+'</span>'
@@ -983,7 +1001,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
             '</div></div>'
         : '<p class="hint">'+(monthMode ? '這個月沒有紀錄。' : '這段期間沒有紀錄，可以往前或往後翻看看。')+'</p>') +
       '<div class="g-legend">'+STAGES.map(function(n, i){ return '<span><i class="k s'+i+'"></i>'+n+'</span>'; }).join('') +
-        '<span><i class="k sdone"></i>已完成</span><span><i class="k s1" style="opacity:.45"></i>備用（淡色）</span><span><i class="e"></i>到期日</span><span><i class="k sfut"></i>還沒走完</span><span><i class="k sover"></i>逾期</span></div>' +
+        '<span><i class="k sdone"></i>已完成</span><span><i class="k s1" style="opacity:.45"></i>備用（淡色）</span><span><i class="k sdone" style="opacity:.4"></i>失效（灰）</span><span><i class="e"></i>到期日</span><span><i class="k sfut"></i>還沒走完</span><span><i class="k sover"></i>逾期</span></div>' +
     '</section>';
 
     var dueCard = (!monthMode || isCurMonth) ? '<section class="ov-card ov-due"><div class="ov-head"><h2>7 天內到期</h2><span class="muted">含已逾期</span></div>' +
@@ -1080,7 +1098,8 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
           '<fieldset><legend class="legend-lbl">到期前幾天開始提醒</legend><div class="picks">' + [1,3,7,14].map(function(n){
               return '<label class="pick"><input type="radio" name="remind" value="'+n+'"'+(n === rem ? ' checked' : '')+'><span>'+n+' 天</span></label>';
             }).join('') + '</div><p class="help">剩下這幾天時，會排到最上面的「需要注意」。</p></fieldset>' +
-          '<label class="check-row" for="f-reserve"><input type="checkbox" id="f-reserve"'+(r && isReserve(r) ? ' checked' : '')+'>設為備用（排到清單最下面）</label>' +
+          '<label class="check-row" for="f-reserve"><input type="checkbox" id="f-reserve"'+(r && r.reserve === true ? ' checked' : '')+'>設為備用（排到清單最下面）</label>' +
+          '<label class="check-row" for="f-invalid"><input type="checkbox" id="f-invalid"'+(r && isInvalid(r) ? ' checked' : '')+'>設為失效（天數照算，不列入提醒和統計）</label>' +
           (isNew ? '<div class="field"><label for="f-note">筆記（選填）</label><textarea id="f-note" class="input" rows="3" maxlength="1000" placeholder="例如：注意事項、聯絡方式…"></textarea></div>' : '') +
           '<p class="err" id="f-err" role="alert"></p>' +
         '</div>' +
@@ -1120,7 +1139,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       var note = ($('#f-note').value || '').trim();
       var stage = parseInt(form.elements.stage.value, 10) || 0;
       var data = { name:name, start:start, periodValue:v, periodUnit:unit, remindDays:rem, status:'active', doneAt:null,
-                   cycle:1, stages:[{ s:stage, date:start }], history:[], reserve:$('#f-reserve').checked,
+                   cycle:1, stages:[{ s:stage, date:start }], history:[], reserve:$('#f-reserve').checked, invalid:$('#f-invalid').checked,
                    notes: note ? [{ id:uid(), date:ymd(todayMs()), text:note, t:now }] : [],
                    createdAt:now, updatedAt:now };
       closeOverlay();
@@ -1132,7 +1151,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       });
       render();
     } else {
-      var patch = { name:name, start:start, periodValue:v, periodUnit:unit, remindDays:rem, reserve:$('#f-reserve').checked, updatedAt:now };
+      var patch = { name:name, start:start, periodValue:v, periodUnit:unit, remindDays:rem, reserve:$('#f-reserve').checked, invalid:$('#f-invalid').checked, updatedAt:now };
       var st = stagesOf(r);
       if (st[0].date === r.start && start !== r.start && (st.length < 2 || start <= st[1].date)){
         st[0] = { s:st[0].s, date:start }; patch.stages = st;
@@ -1310,8 +1329,14 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
         if (ok) toast('「' + nm + '」已標記完成', { label:'復原', fn:function(){ write(function(){ return ref.update({ status:'active', doneAt:null, updatedAt:Date.now() }); }); } });
       });
     }
+    else if (act === 'invalid'){
+      var wasI = isInvalid(r), rid5 = r.id;
+      write(function(){ return docRef(rid5).update({ invalid:!wasI, updatedAt:Date.now() }); }).then(function(ok){
+        if (ok) toast(wasI ? '已取消失效' : '已設為失效，移到清單最下面', { label:'復原', fn:function(){ write(function(){ return docRef(rid5).update({ invalid:wasI, updatedAt:Date.now() }); }); } });
+      });
+    }
     else if (act === 'reserve'){
-      var was = isReserve(r), rid4 = r.id;
+      var was = r.reserve === true, rid4 = r.id;
       write(function(){ return docRef(rid4).update({ reserve:!was, updatedAt:Date.now() }); }).then(function(ok){
         if (ok) toast(was ? '已取消備用' : '已設為備用，排到清單最下面', { label:'復原', fn:function(){ write(function(){ return docRef(rid4).update({ reserve:was, updatedAt:Date.now() }); }); } });
       });
