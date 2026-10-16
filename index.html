@@ -240,7 +240,7 @@ body.tab-overview .panes, body.tab-overview .fab, body.tab-overview #searchBtn, 
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend b{font-family:var(--num);font-weight:800}
 .tile{background:var(--surface);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
-.tile span{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;white-space:nowrap}
+.tile span{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;line-height:1.3}
 .tile b{font-family:var(--num);font-size:22px;line-height:1.2}
 .g-nav{display:flex;align-items:center;gap:2px}
 .g-nav .range{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;padding:0 2px}
@@ -370,6 +370,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
   .ov-r{display:flex;flex-direction:column;gap:16px;width:340px;flex-shrink:0}
   .ov-gantt{padding:16px 20px 14px}
   .ov-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .ov-tiles .tile:last-child:nth-child(odd){grid-column:span 2}
   .tile{padding:12px 14px}
   .tile span{font-size:13px}
   .tile b{font-size:28px}
@@ -384,6 +385,9 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
   .wk-stack{width:24px}
 }
 @media (max-width:839px){
+  .ov-tiles.five{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .ov-tiles.five .tile{grid-column:span 2}
+  .ov-tiles.five .tile:nth-child(n+4){grid-column:span 3}
   body.detail-open .list-pane, body.detail-open .top, body.detail-open .search-row, body.detail-open .fab, body.detail-open .banner, body.detail-open .tabbar{display:none}
   body:not(.detail-open) .detail-pane{display:none}
 }
@@ -544,6 +548,10 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
   function stageOf(r){ var st = stagesOf(r); return st[st.length-1].s; }
   function isInvalid(r){ return r.invalid === true && r.status !== 'done'; }
   function isReserve(r){ return r.reserve === true && r.status !== 'done' && !isInvalid(r); }
+  function invalidDay(r){
+    if (validDate(r.invalidAt)) return parseD(r.invalidAt);
+    var u = new Date(+r.updatedAt || 0); return r.updatedAt ? Date.UTC(u.getFullYear(), u.getMonth(), u.getDate()) : NaN;
+  }
   function laneTag(r){ return isInvalid(r) ? '失效' : isReserve(r) ? '備用' : ''; }
   function stageText(r){ return r.status === 'done' ? '已完成' : STAGES[stageOf(r)]; }
 
@@ -856,8 +864,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     function bucket(bs, be){
       var D = Math.min(be - DAY, T), by = [0,0,0,0], byMain = [0,0,0,0], started = 0, finished = 0, due = 0, over = 0;
       S.records.forEach(function(r){
-        if (isInvalid(r)) return;
-        var res = isReserve(r);
+        var res = isReserve(r) || isInvalid(r);
         cyclesOf(r).forEach(function(cy){
           if (cy.start <= D && D < cy.stop){
             var st = stageAt(cy, D); by[st]++;
@@ -868,7 +875,8 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
           if (!cy.hist && !res && cy.planned >= bs && cy.planned < be) due++;
         });
       });
-      return { bs:bs, be:be, by:by, byMain:byMain, total:by[0]+by[1]+by[2]+by[3], started:started, finished:finished, due:due, over:over };
+      var voided = S.records.filter(function(r){ var d = invalidDay(r); return isInvalid(r) && d >= bs && d < be; }).length;
+      return { bs:bs, be:be, voided:voided, by:by, byMain:byMain, total:by[0]+by[1]+by[2]+by[3], started:started, finished:finished, due:due, over:over };
     }
     function sum(a){ return a[0]+a[1]+a[2]+a[3]; }
     function monthName(ms){ var d = new Date(ms); return (d.getUTCFullYear() !== curY ? d.getUTCFullYear() + '年' : '') + (d.getUTCMonth()+1) + '月'; }
@@ -940,8 +948,8 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     function tile(label, n, warn){
       return '<div class="tile"><span>'+(warn && n ? '<span style="color:var(--over);display:inline-flex">'+ic(P.warn,13,2.4)+'</span>' : '')+label+'</span><b>'+n+'</b></div>';
     }
-    var tiles = '<div class="ov-tiles">' + (monthMode
-      ? tile(mWord + '新開始', M.started) + tile(mWord + '完成', M.finished) + tile(mWord + '到期', M.due) + tile(isCurMonth ? '逾期' : '月底逾期', M.over, true)
+    var tiles = '<div class="ov-tiles'+(monthMode ? ' five' : '')+'">' + (monthMode
+      ? tile(mWord + '新開始', M.started) + tile(mWord + '完成', M.finished) + tile(mWord + '到期', M.due) + tile(mWord + '失效', M.voided) + tile(isCurMonth ? '逾期' : '月底逾期', M.over, true)
       : tile('全部紀錄', items.length) + tile('進行中', main.length) + tile('已完成', doneN) + tile('逾期', overNow, true)) + '</div>';
 
     /* gantt: the whole month, or a rolling window of weeks */
@@ -1139,7 +1147,7 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       var note = ($('#f-note').value || '').trim();
       var stage = parseInt(form.elements.stage.value, 10) || 0;
       var data = { name:name, start:start, periodValue:v, periodUnit:unit, remindDays:rem, status:'active', doneAt:null,
-                   cycle:1, stages:[{ s:stage, date:start }], history:[], reserve:$('#f-reserve').checked, invalid:$('#f-invalid').checked,
+                   cycle:1, stages:[{ s:stage, date:start }], history:[], reserve:$('#f-reserve').checked, invalid:$('#f-invalid').checked, invalidAt:$('#f-invalid').checked ? ymd(todayMs()) : null,
                    notes: note ? [{ id:uid(), date:ymd(todayMs()), text:note, t:now }] : [],
                    createdAt:now, updatedAt:now };
       closeOverlay();
@@ -1151,7 +1159,9 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
       });
       render();
     } else {
-      var patch = { name:name, start:start, periodValue:v, periodUnit:unit, remindDays:rem, reserve:$('#f-reserve').checked, invalid:$('#f-invalid').checked, updatedAt:now };
+      var invNow = $('#f-invalid').checked;
+      var patch = { name:name, start:start, periodValue:v, periodUnit:unit, remindDays:rem, reserve:$('#f-reserve').checked, invalid:invNow, updatedAt:now };
+      if (invNow !== isInvalid(r)) patch.invalidAt = invNow ? ymd(todayMs()) : null;
       var st = stagesOf(r);
       if (st[0].date === r.start && start !== r.start && (st.length < 2 || start <= st[1].date)){
         st[0] = { s:st[0].s, date:start }; patch.stages = st;
@@ -1331,8 +1341,8 @@ textarea.input{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
     }
     else if (act === 'invalid'){
       var wasI = isInvalid(r), rid5 = r.id;
-      write(function(){ return docRef(rid5).update({ invalid:!wasI, updatedAt:Date.now() }); }).then(function(ok){
-        if (ok) toast(wasI ? '已取消失效' : '已設為失效，移到清單最下面', { label:'復原', fn:function(){ write(function(){ return docRef(rid5).update({ invalid:wasI, updatedAt:Date.now() }); }); } });
+      write(function(){ return docRef(rid5).update({ invalid:!wasI, invalidAt: wasI ? null : ymd(todayMs()), updatedAt:Date.now() }); }).then(function(ok){
+        if (ok) toast(wasI ? '已取消失效' : '已設為失效，移到清單最下面', { label:'復原', fn:function(){ write(function(){ return docRef(rid5).update({ invalid:wasI, invalidAt: wasI ? (r.invalidAt || null) : null, updatedAt:Date.now() }); }); } });
       });
     }
     else if (act === 'reserve'){
